@@ -1,0 +1,100 @@
+#!/usr/bin/env perl
+use strict;
+use warnings;
+use Data::Dumper;
+
+BEGIN {
+    $INC{$_} = __FILE__
+      for map { ( my $pkg = "$_.pm" ) =~ s!::!/!g; $pkg } (
+        qw(
+          Server
+          ServerManager
+          )
+      );
+}
+
+#################################################
+# Server
+#################################################
+{
+
+    package Server;
+
+    use strict;
+    use warnings;
+    use Net::Ping;
+
+    sub new {
+        my $class = shift;
+        my $self  = bless {
+            'ip'         => '',
+            'is_primary' => '',
+            'is_alive'   => '',
+        }, $class;
+
+        return $self;
+    }
+
+    sub set_status {
+        my ( $self, $opts ) = @_;
+
+        $self->{ip}         = $opts->{ip};
+        $self->{is_primary} = $opts->{is_primary};
+        $self->{is_alive}   = $opts->{is_alive};
+    }
+
+    sub check_ping {
+        my ( $self, $opts ) = @_;
+
+        my $ping = Net::Ping->new();
+        $self->{is_alive} = undef unless $ping->ping( $self->{ip} );
+        $ping->close;
+    }
+
+    1;
+}
+
+#################################################
+# ServerManager
+#################################################
+{
+
+    package ServerManager;
+
+    use strict;
+    use warnings;
+
+    sub new {
+        my $class = shift;
+        my $self  = bless {
+            servers => [];
+            alive_servers => [];
+            dead_servers => [];
+        }, $class;
+
+        return $self;
+    }
+
+}
+
+#################################################
+# main routine
+#################################################
+
+sub main {
+    @ARGV = @_;
+
+    my @servers = [
+        { 'ip' => '192.168.41.1', is_primary => 'true', is_alive => 'true' },
+        { 'ip' => '192.168.41.1', is_primary => 'true', is_alive => 'true' }
+    ];
+
+    my $server = new Server;
+    $server->set_status();
+    warn Dumper $server;
+    $server->check_ping;
+    warn Dumper $server;
+
+}
+
+main();
