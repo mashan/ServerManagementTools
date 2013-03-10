@@ -30,17 +30,23 @@ BEGIN {
             'ip'         => '',
             'is_primary' => '',
             'is_alive'   => '',
+            @_,
         }, $class;
 
         return $self;
     }
 
-    sub set_status {
+    sub init {
         my ( $self, $opts ) = @_;
 
         $self->{ip}         = $opts->{ip};
         $self->{is_primary} = $opts->{is_primary};
         $self->{is_alive}   = $opts->{is_alive};
+    }
+
+    sub is_alive {
+        my $self = shift;
+        return $self->{is_alive};
     }
 
     sub check_ping {
@@ -63,18 +69,65 @@ BEGIN {
 
     use strict;
     use warnings;
+    use Server;
 
     sub new {
         my $class = shift;
         my $self  = bless {
-            servers => [];
-            alive_servers => [];
-            dead_servers => [];
+            servers       => [],
+            alive_servers => [],
+            dead_servers  => [],
+            @_,
         }, $class;
 
         return $self;
     }
 
+    sub get_servers {
+        my $self = shift;
+        return @{ $self->{servers} };
+    }
+
+    sub dead_servers {
+        my $self = shift;
+        return $self->dead_servers;
+    }
+
+    sub add_dead_server {
+        my $self   = shift;
+        my $server = shift;
+        push @{ $self->{dead_servers} }, $server;
+    }
+
+    sub init_servers {
+        my $self    = shift;
+        my @servers = $self->get_servers();
+        $self->{alive_servers} = [];
+        $self->{dead_servers}  = [];
+
+        foreach my $server (@servers) {
+            if ( $server->{dead} ) {
+                $self->add_dead_server($server);
+            }
+            else {
+                $self->add_alive_server($server);
+            }
+        }
+    }
+
+    sub connect_all_servers {
+        my $self    = shift;
+        my @servers = $self->get_servers;
+
+        foreach my $target (@servers) {
+            $target->check_ping;
+            unless ( $target->is_alive ) {
+                $self->add_dead_server($target);
+            }
+        }
+    }
+
+    1;
 }
 
 #################################################
@@ -84,17 +137,20 @@ BEGIN {
 sub main {
     @ARGV = @_;
 
-    my @servers = [
-        { 'ip' => '192.168.41.1', is_primary => 'true', is_alive => 'true' },
-        { 'ip' => '192.168.41.1', is_primary => 'true', is_alive => 'true' }
-    ];
-
-    my $server = new Server;
-    $server->set_status();
-    warn Dumper $server;
-    $server->check_ping;
+    my $server = new Server( 'ip' => '192.168.41.1', is_primary => 'true', is_alive => 'true');
+    use Data::Dumper;
+    local $Data::Dumper::Indent = 1;
+    local $Data::Dumper::Terse  = 1;
     warn Dumper $server;
 
+    my $manager = new ServerManager( servers => $server );
+    warn Dumper $manager;
+    $manager->init_servers($server);
+
+    use Data::Dumper;
+    local $Data::Dumper::Indent = 1;
+    local $Data::Dumper::Terse  = 1;
+    warn Dumper $manager;
 }
 
 main();
