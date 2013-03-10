@@ -1,7 +1,7 @@
 #!/usr/bin/env perl
 use strict;
 use warnings;
-use Data::Dumper;
+use YAML::Tiny;
 
 BEGIN {
     $INC{$_} = __FILE__
@@ -24,6 +24,8 @@ BEGIN {
     use warnings;
     use Net::Ping;
 
+    our $PING_TIMEOUT = 3;
+
     sub new {
         my $class = shift;
         my $self  = bless {
@@ -36,24 +38,30 @@ BEGIN {
         return $self;
     }
 
-    sub init {
-        my ( $self, $opts ) = @_;
-
-        $self->{ip}         = $opts->{ip};
-        $self->{is_primary} = $opts->{is_primary};
-        $self->{is_alive}   = $opts->{is_alive};
-    }
-
     sub is_alive {
         my $self = shift;
         return $self->{is_alive};
     }
 
+    sub is_primary {
+        my $self = shift;
+        return $self->{is_primary};
+    }
+
+    sub health_check {
+        my $self = shift;
+
+        $self->{is_alive} = 'true';
+        $self->check_ping;
+    }
+
     sub check_ping {
-        my ( $self, $opts ) = @_;
+        my $self = shift;
 
         my $ping = Net::Ping->new();
-        $self->{is_alive} = undef unless $ping->ping( $self->{ip} );
+        unless ( $ping->ping( $self->{ip}, $PING_TIMEOUT ) ) {
+            $self->{is_alive} = undef;
+        }
         $ping->close;
     }
 
@@ -88,6 +96,17 @@ BEGIN {
         return @{ $self->{servers} };
     }
 
+    sub alive_servers {
+        my $self = shift;
+        return $self->alive_servers;
+    }
+
+    sub add_alive_server {
+        my $self   = shift;
+        my $server = shift;
+        push @{ $self->{alive_servers} }, $server;
+    }
+
     sub dead_servers {
         my $self = shift;
         return $self->dead_servers;
@@ -118,10 +137,15 @@ BEGIN {
     sub connect_all_servers {
         my $self    = shift;
         my @servers = $self->get_servers;
+        $self->{alive_servers} = [];
+        $self->{dead_servers}  = [];
 
         foreach my $target (@servers) {
-            $target->check_ping;
-            unless ( $target->is_alive ) {
+            $target->health_check;
+            if ( $target->is_alive ) {
+                $self->add_alive_server($target);
+            }
+            else {
                 $self->add_dead_server($target);
             }
         }
@@ -137,20 +161,33 @@ BEGIN {
 sub main {
     @ARGV = @_;
 
-    my $server = new Server( 'ip' => '192.168.41.1', is_primary => 'true', is_alive => 'true');
-    use Data::Dumper;
-    local $Data::Dumper::Indent = 1;
-    local $Data::Dumper::Terse  = 1;
-    warn Dumper $server;
+    local $/;
+    my $config_data = <DATA>;
+    my $yaml = YAML::Tiny->new;
+    $yaml = YAML::Tiny->read_string($config_data);
+    my $server_config = $yaml->[0]->{servers};
 
-    my $manager = new ServerManager( servers => $server );
-    warn Dumper $manager;
-    $manager->init_servers($server);
+    my @servers;
+    foreach my $conf (@$server_config) {
+        my $server = new Server(
+            'ip'         => $conf->{ip},
+            'is_primary' => $conf->{is_primary},
+        );
 
-    use Data::Dumper;
-    local $Data::Dumper::Indent = 1;
-    local $Data::Dumper::Terse  = 1;
-    warn Dumper $manager;
+        push ( @servers, $server );
+    }
+
+    my $manager = new ServerManager( servers => \@servers );
+    $manager->init_servers;
+    $manager->connect_all_servers;
 }
 
 main();
+
+__END__
+servers:
+  -
+    ip: 127.0.0.1
+    is_primary: true
+  -
+    ip: 192.168.41.1
