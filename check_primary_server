@@ -82,9 +82,10 @@ BEGIN {
     sub new {
         my $class = shift;
         my $self  = bless {
-            servers       => [],
-            alive_servers => [],
-            dead_servers  => [],
+            servers        => [],
+            alive_servers  => [],
+            dead_servers   => [],
+            failover_script => '',
             @_,
         }, $class;
 
@@ -98,7 +99,7 @@ BEGIN {
 
     sub alive_servers {
         my $self = shift;
-        return $self->alive_servers;
+        return @{ $self->{alive_servers} };
     }
 
     sub add_alive_server {
@@ -109,13 +110,18 @@ BEGIN {
 
     sub dead_servers {
         my $self = shift;
-        return $self->dead_servers;
+        return @{ $self->{dead_servers} };
     }
 
     sub add_dead_server {
         my $self   = shift;
         my $server = shift;
         push @{ $self->{dead_servers} }, $server;
+    }
+
+    sub failover_script{
+        my $self = shift;
+        return $self->{failover_script};
     }
 
     sub init_servers {
@@ -151,6 +157,28 @@ BEGIN {
         }
     }
 
+    sub check_primary_alive {
+        my $self          = shift;
+        my @alive_servers = $self->alive_servers;
+        my $is_alive      = undef;
+
+        foreach my $server (@alive_servers) {
+            if ( defined $server->is_primary ) {
+                $is_alive = 'true';
+            }
+        }
+
+        return $is_alive;
+    }
+
+    sub run_failover {
+        my $self = shift;
+        my $script = $self->failover_script;
+
+        my $v = `$script`;
+        print qq{$v\n};
+    }
+
     1;
 }
 
@@ -163,7 +191,7 @@ sub main {
 
     local $/;
     my $config_data = <DATA>;
-    my $yaml = YAML::Tiny->new;
+    my $yaml        = YAML::Tiny->new;
     $yaml = YAML::Tiny->read_string($config_data);
     my $server_config = $yaml->[0]->{servers};
 
@@ -174,12 +202,30 @@ sub main {
             'is_primary' => $conf->{is_primary},
         );
 
-        push ( @servers, $server );
+        push( @servers, $server );
     }
 
-    my $manager = new ServerManager( servers => \@servers );
+    my $failover_script = $yaml->[0]->{failover_script};
+    my $manager         = new ServerManager(
+        servers         => \@servers,
+        failover_script => $failover_script
+    );
     $manager->init_servers;
-    $manager->connect_all_servers;
+
+    my $check_interval = $yaml->[0]->{check_interval};
+    while (1) {
+        $manager->connect_all_servers;
+        my $is_primary_alive = $manager->check_primary_alive;
+        unless ($is_primary_alive) {
+            print qq{Primary Server Down!!\n};
+            $manager->run_failover;
+            last;
+        }
+
+        sleep $check_interval;
+    }
+
+    print qq{Done Failover!!\n};
 }
 
 main();
@@ -191,3 +237,5 @@ servers:
     is_primary: true
   -
     ip: 192.168.41.1
+failover_script: ls
+check_interval: 5
